@@ -1,0 +1,397 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User & Role Management
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   // ADMIN, MANAGER, WAREHOUSE, SALES, QC
+  dailyRate Float    @default(0) // Luong ngay
+  allowance Float    @default(0) // Phu cap
+  otRate    Float    @default(1.5) // He so OT (1.5, 2.0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  employeeCode String? @unique // NV001
+  pinCode      String? // 1234
+  
+  attendances Attendance[]
+  requests    Request[]
+}
+
+// HR: Timekeeping & GPS Attendance
+model Attendance {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  date             DateTime // Day of attendance (YYYY-MM-DD 00:00:00)
+  checkInTime      DateTime
+  checkInLocation  String?  // Lat,Long
+  checkOutTime     DateTime?
+  checkOutLocation String?
+  lateMinutes      Int      @default(0)
+  earlyMinutes     Int      @default(0)
+  otHours          Float    @default(0)
+  note             String?
+  status           String   // ON_TIME, LATE, EARLY_LEAVE
+  createdAt        DateTime @default(now())
+}
+
+// Warehouse: Raw Materials (Vải, Nguyên phụ liệu)
+model Material {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  type        String   // Fabric, Button, Thread...
+  color       String?
+  width       Float?   // Kho vai (cm)
+  gsm         Float?   // Weight
+  supplier    String?
+  lotNumber   String?
+  quantity    Float    @default(0)
+  unit        String   // METER, KG, ROLL, PCS
+  location    String?  // Shelf A1, B2...
+  minStock    Float    @default(0) // Canh bao ton thieu
+  image       String?
+  
+  allocatedOrderId String? 
+  allocatedOrder   Order?  @relation("MaterialAllocation", fields: [allocatedOrderId], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  logs        InventoryLog[]
+  receiptItems MaterialReceiptItem[]
+}
+
+// ...
+
+
+model Product {
+  id          String   @id @default(cuid())
+  code        String?
+  name        String
+  size        String?
+  color       String?
+  quantity    Int      @default(0)
+  consumption Float    @default(0) // Dinh muc vai (m/cai) transfered from Quote
+  orderId     String?
+  order       Order?   @relation(fields: [orderId], references: [id])
+  location    String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Business: Orders (B2B)
+model Order {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  customerName   String
+  contactInfo    String?
+  status         String   // QUOTE, CONFIRMED, PRODUCING, DELIVERED, COMPLETED
+  totalAmount    Float    @default(0)
+  deadline       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  items          Product[]
+  productionPlan ProductionPlan?
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id])
+
+  purchaseRequests PurchaseRequest[]
+  allocatedMaterials Material[] @relation("MaterialAllocation")
+}
+
+// CRM: Customer Management
+model Customer {
+  id              String   @id @default(cuid())
+  name            String   // Lead Name / Contact Person
+  companyName     String?  // Shop / Company
+  phone           String   @unique
+  email           String?
+  address         String?  // New field
+  taxId           String?
+  type            String   // WHOLESALE, PROCESSING, UNIFORM
+  status          String   // LEAD, CUSTOMER, BLACKLIST
+  source          String   // FACEBOOK, REFERRAL, MARKET
+  tags            String?  // Comma separated tags: VIP, HCM, HARD
+  totalRevenue    Float    @default(0)
+  lastInteraction DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  orders          Order[]
+}
+
+// Procurement: Suppliers
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  phone     String?
+  address   String?
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+// Procurement: Purchase Orders (Don Dat Hang)
+model PurchaseOrder {
+  id          String   @id @default(cuid())
+  code        String   @unique // PO-2024-001
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  
+  status      String   @default("DRAFT") // DRAFT, SENT, PARTIAL, COMPLETED, CANCELLED
+  totalAmount Float    @default(0)
+  
+  expectedDate DateTime?
+  note         String?
+  
+  items       PurchaseOrderItem[]
+  requests    PurchaseRequest[]
+  receipts    MaterialReceipt[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  
+  materialName    String // Snapshot of name
+  materialId      String? // Optional link to Material if known
+  
+  quantity        Float
+  unit            String
+  unitPrice       Float @default(0)
+  total           Float @default(0)
+}
+
+// Warehouse: Goods Receipt (Phieu Nhap Kho)
+model MaterialReceipt {
+  id              String   @id @default(cuid())
+  code            String   @unique // PNK-2024-001
+  
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  
+  date            DateTime @default(now())
+  performer       String?  // Nguoi nhap
+  
+  note            String?
+  
+  items           MaterialReceiptItem[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model MaterialReceiptItem {
+  id              String        @id @default(cuid())
+  receiptId       String
+  receipt         MaterialReceipt @relation(fields: [receiptId], references: [id])
+  
+  materialId      String
+  material        Material      @relation(fields: [materialId], references: [id])
+  
+  quantity        Float // Thuc nhap
+  unit            String
+  
+  lotNumber       String?
+}
+
+// Procurement: Purchase Requests (Yeu cau mua vat tu)
+model PurchaseRequest {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  
+  materialName String // "Vải Poly Thái Đỏ Đô"
+  quantity     Float  // Calculated amount
+  unit         String // "METER"
+  
+  status       String @default("PENDING") // PENDING, ORDERED, RECEIVED
+  
+  supplierId   String?
+  supplier     Supplier? @relation(fields: [supplierId], references: [id])
+  
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Production Management
+model ProductionPlan {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id])
+  startDate DateTime?
+  endDate   DateTime?
+  status    String   // PLANNED, IN_PROGRESS, COMPLETED
+  stages    ProductionStage[]
+}
+
+model ProductionStage {
+  id               String   @id @default(cuid())
+  planId           String
+  plan             ProductionPlan @relation(fields: [planId], references: [id])
+  name             String   // CUTTING, SEWING, QC, PACKING
+  status           String   // PENDING, IN_PROGRESS, COMPLETED
+  quantityTarget   Int
+  quantityProduced Int      @default(0)
+  quantityError    Int      @default(0)
+  workerTeam       String?  // To doi thuc hien
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Request: Leave, OT, Explanation
+model Request {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String   // LEAVE, OT, EXPLANATION
+  reason    String
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  date      DateTime // Target date
+  isPaid    Boolean  @default(false) // For Leave: Paid or Unpaid
+  managerComment String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// B2B Quote (Bao Gia)
+model Quote {
+  id        String   @id @default(cuid())
+  code      String   @unique // BG-2024-001
+  
+  // Recipient
+  customerName String // "CÔNG TY TNHH ĐIỆN TỬ FOSTER QUẢNG NGÃI"
+  customerAddress String?
+
+  date      DateTime @default(now())
+  
+  // Terms
+  introText String?  // "Trước tiên..."
+  footerText String? // "Giá trên chưa bao gồm..."
+  
+  totalAmount Float    @default(0)
+  
+  items     QuoteItem[]
+  
+  status    String   @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SENT
+  
+  // Approval
+  approvalNotes String?
+  approverId    String? 
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Pricing reference
+model FabricPrice {
+  id          String   @id @default(uuid())
+  name        String   // "Vải Cotton 4H"
+  code        String?  // "V001"
+  marketPrice Float    // 80000
+  supplier    String?  // "Chị Lan Chợ Cồn"
+  updatedAt   DateTime @updatedAt
+}
+
+model QuoteItem {
+  id          String  @id @default(uuid())
+  quoteId     String
+  quote       Quote   @relation(fields: [quoteId], references: [id])
+  stt         Int?
+  productName String
+  unit        String?
+  quantity    String? // Keep as string for ranges like "50-100"
+  price       Float   @default(0)
+  consumption Float   @default(1.2) // Dinh muc vai (m/cai)
+  note        String?
+  imageUrl    String?
+}
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // Store as string, parse as needed (e.g. "50000", "1.5")
+  description String?
+  updatedAt DateTime @updatedAt
+}
+
+model Campaign {
+  id        String   @id @default(uuid())
+  name      String
+  subject   String
+  content   String
+  targetAudience String? @default("ALL") // ALL, WHOLESALE, PROCESSING, LEAD
+  status    String   @default("DRAFT") // DRAFT, SENT
+  sentCount Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  logs      EmailLog[]
+}
+
+model EmailLog {
+  id         String   @id @default(uuid())
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+  recipient  String
+  subject    String
+  status     String   @default("SENT") // SENT, FAILED
+  opened     Boolean  @default(false)
+  sentAt     DateTime @default(now())
+}
+
+// Logs & History
+model InventoryLog {
+  id          String   @id @default(cuid())
+  materialId  String
+  material    Material @relation(fields: [materialId], references: [id])
+  type        String   // IMPORT, EXPORT, ADJUST
+  quantity    Float    // Positive for import, negative for export
+  prevQuantity Float?  // Snapshot before change
+  newQuantity  Float?  // Snapshot after change
+  reason      String?
+  performer   String?
+  createdAt   DateTime @default(now())
+}
+
+// CRM: Leads (Potential Customers)
+model Lead {
+  id             String   @id @default(cuid())
+  name           String   // Contact Name
+  companyName    String?  // Company / Shop Name
+  phone          String   @unique
+  email          String?
+  source         String?  // FACEBOOK, ZALO, WEBSITE, REFERRAL, OTHER
+  status         String   @default("NEW") // NEW, CONTACTED, QUALIFIED, NEGOTIATING, WON, LOST
+  estimatedValue Float    @default(0)
+  assignedTo     String?  // User ID of sales rep
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+

@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: glacial-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/glacial_db?schema=public
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=your_secret_key_change_this
+    depends_on:
+      - db
+    networks:
+      - glacial-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: glacial-db
+    restart: always
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=glacial_db
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - glacial-network
+
+volumes:
+  db_data:
+
+networks:
+  glacial-network:
+    driver: bridge
