@@ -83,43 +83,73 @@ MESSAGE: ${statusMessage}
 
     console.log(logContent);
 
-    // Attempt to send
+    // -------------------------------------------------------
+    // 1. Create PENDING Log Entry to get the ID
+    // -------------------------------------------------------
+    let emailLogId = "";
+    try {
+        const logEntry = await prisma.emailLog.create({
+            data: {
+                recipient: to,
+                subject: subject,
+                status: 'PENDING', // Initial status
+                opened: false,
+                sentAt: new Date(),
+                // campaignId can be added here if this is part of a campaign
+            }
+        });
+        emailLogId = logEntry.id;
+    } catch (dbErr) {
+        console.error("Failed to create initial email log:", dbErr);
+        // Continue sending even if logging fails, but tracking won't work
+    }
+
+    // -------------------------------------------------------
+    // 2. Inject Tracking Pixel
+    // -------------------------------------------------------
+    const baseUrl = process.env.NEXTAUTH_URL || "https://quan-ly-xsxdtt.vercel.app";
+    const trackingUrl = `${baseUrl}/api/tracking/pixel/${emailLogId}`;
+    const trackingPixelHtml = emailLogId
+        ? `<img src="${trackingUrl}" alt="" width="1" height="1" style="display:none; width:1px; height:1px; opacity:0;" />`
+        : "";
+
+    // Append pixel to the end of the body
+    const finalHtmlBody = htmlBody + trackingPixelHtml;
+
+    // -------------------------------------------------------
+    // 3. Attempt to Send
+    // -------------------------------------------------------
     try {
         await transporter.sendMail({
             from: `"Xưởng may Dương Thành Tín" <${EMAIL_USER || 'no-reply@duongthanhtin.com'}>`,
             to,
             subject,
-            html: htmlBody
+            html: finalHtmlBody
         });
         console.log(`[CRM] Email sent successfully to ${to}`);
 
-        // Log to Database (Unified CRM Log)
-        await prisma.emailLog.create({
-            data: {
-                recipient: to,
-                subject: subject,
-                status: 'SENT',
-                opened: false, // System emails don't track open yet
-                sentAt: new Date()
-            }
-        });
+        // Update Log to SENT
+        if (emailLogId) {
+            await prisma.emailLog.update({
+                where: { id: emailLogId },
+                data: { status: 'SENT' }
+            });
+        }
 
     } catch (error) {
         console.error("[CRM] Failed to send email:", error);
-        // Log failure to file
+
+        // Log failure to file (Legacy)
         const failLog = `[${timestamp}] [ERROR] Failed to send to ${to}: ${error}\n`;
         const logPath = path.join(process.cwd(), 'public', 'email_logs.txt');
         fs.appendFileSync(logPath, failLog);
 
-        // Log failure to Database
-        await prisma.emailLog.create({
-            data: {
-                recipient: to,
-                subject: subject,
-                status: 'FAILED',
-                opened: false,
-                sentAt: new Date()
-            }
-        });
+        // Update Log to FAILED
+        if (emailLogId) {
+            await prisma.emailLog.update({
+                where: { id: emailLogId },
+                data: { status: 'FAILED' }
+            });
+        }
     }
 }

@@ -361,6 +361,7 @@ model EmailLog {
   subject    String
   status     String   @default("SENT") // SENT, FAILED
   opened     Boolean  @default(false)
+  openedAt   DateTime? // Track when it was opened
   sentAt     DateTime @default(now())
 }
 
